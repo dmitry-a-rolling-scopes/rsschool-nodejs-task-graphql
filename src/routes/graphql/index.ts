@@ -27,6 +27,9 @@ import { UsersResolver } from './resolvers/users.resolver.js';
 import { UUID } from 'node:crypto';
 import { MemberTypeId } from '../member-types/schemas.js';
 import depthLimit from 'graphql-depth-limit';
+import DataLoader from 'dataloader';
+import { Profile as ProfileEntity, User as UserEntity } from '@prisma/client';
+import { Context } from './context.interface.js';
 
 const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
   const { prisma } = fastify;
@@ -65,7 +68,14 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
       id: { type: new GraphQLNonNull(UUIDType) },
       isMale: { type: new GraphQLNonNull(GraphQLBoolean) },
       yearOfBirth: { type: new GraphQLNonNull(GraphQLInt) },
-      memberType: { type: new GraphQLNonNull(MemberType) },
+      memberType: {
+        type: new GraphQLNonNull(MemberType),
+        resolve: async (profile: ProfileEntity, _args, context: Context) => {
+          return await context.dataLoaders.memberTypes.load(
+            profile.memberTypeId as MemberTypeId,
+          );
+        },
+      },
     },
   });
 
@@ -84,13 +94,29 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
       id: { type: new GraphQLNonNull(UUIDType) },
       name: { type: new GraphQLNonNull(GraphQLString) },
       balance: { type: new GraphQLNonNull(GraphQLFloat) },
-      profile: { type: Profile },
-      posts: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Post))) },
+      profile: {
+        type: Profile,
+        resolve: async (user: UserEntity, _args, context: Context) => {
+          return await context.dataLoaders.profiles.load(user.id as UUID);
+        },
+      },
+      posts: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Post))),
+        resolve: async (user: UserEntity, _args, context: Context) => {
+          return await context.dataLoaders.posts.load(user.id as UUID);
+        },
+      },
       userSubscribedTo: {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(User))),
+        resolve: async (user: UserEntity, _args, context: Context) => {
+          return await context.dataLoaders.userSubscribedTo.load(user.id as UUID);
+        },
       },
       subscribedToUser: {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(User))),
+        resolve: async (user: UserEntity, _args, context: Context) => {
+          return await context.dataLoaders.subscribedToUser.load(user.id as UUID);
+        },
       },
     }),
   });
@@ -107,7 +133,7 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
         args: {
           id: { type: new GraphQLNonNull(MemberTypeId) },
         },
-        resolve: async (_, { id }: { id: UUID }) =>
+        resolve: async (_, { id }: { id: MemberTypeId }) =>
           await memberTypesProvider.getMemberType(id),
       },
       users: {
@@ -322,7 +348,9 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
           id: { type: new GraphQLNonNull(UUIDType) },
         },
         resolve: async (_, { id }: { id: UUID }) => {
-          return await usersResolver.delete(id);
+          await usersResolver.delete(id);
+
+          return id;
         },
       },
       deletePost: {
@@ -331,7 +359,9 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
           id: { type: new GraphQLNonNull(UUIDType) },
         },
         resolve: async (_, { id }: { id: UUID }) => {
-          return await postsResolver.delete(id);
+          await postsResolver.delete(id);
+
+          return id;
         },
       },
       deleteProfile: {
@@ -340,7 +370,9 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
           id: { type: new GraphQLNonNull(UUIDType) },
         },
         resolve: async (_, { id }: { id: UUID }) => {
-          return await profilesResolver.delete(id);
+          await profilesResolver.delete(id);
+
+          return id;
         },
       },
       subscribeTo: {
@@ -350,7 +382,9 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
           authorId: { type: new GraphQLNonNull(UUIDType) },
         },
         resolve: async (_, { userId, authorId }: { userId: UUID; authorId: UUID }) => {
-          return await usersResolver.subscribeTo(userId, authorId);
+          await usersResolver.subscribeTo(userId, authorId);
+
+          return userId;
         },
       },
       unsubscribeFrom: {
@@ -360,11 +394,51 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
           authorId: { type: new GraphQLNonNull(UUIDType) },
         },
         resolve: async (_, { userId, authorId }: { userId: UUID; authorId: UUID }) => {
-          return await usersResolver.unsubscribeFrom(userId, authorId);
+          await usersResolver.unsubscribeFrom(userId, authorId);
+
+          return userId;
         },
       },
     },
   });
+
+  const dataLoaders = {
+    memberTypes: new DataLoader(async (memberTypeIds) => {
+      const memberTypes = await memberTypesProvider.getMemberTypesByIds(
+        memberTypeIds as MemberTypeId[],
+      );
+
+      return memberTypeIds.map((memberTypeId) =>
+        memberTypes.find((memberType) => memberType.id === memberTypeId),
+      );
+    }),
+    posts: new DataLoader(async (userIds) => {
+      const posts = await postsProvider.getPostsByAuthorIds(userIds as UUID[]);
+
+      return userIds.map((userId) => posts.filter((post) => post.authorId === userId));
+    }),
+    profiles: new DataLoader(async (userIds) => {
+      const profiles = await profilesProvider.getProfilesByUserIds(userIds as UUID[]);
+
+      return userIds.map((userId) =>
+        profiles.find((profile) => profile.userId === userId),
+      );
+    }),
+    subscribedToUser: new DataLoader(async (userIds) => {
+      const users = await usersProvider.getSubscribedToUsersByAuthorIds(
+        userIds as UUID[],
+      );
+
+      return userIds.map(() => users);
+    }),
+    userSubscribedTo: new DataLoader(async (userIds) => {
+      const users = await usersProvider.getUserSubscribedToUsersBySubscriberIds(
+        userIds as UUID[],
+      );
+
+      return userIds.map(() => users);
+    }),
+  };
 
   const schema = new GraphQLSchema({
     query: RootQueryType,
@@ -391,6 +465,9 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
       const result = await execute({
         schema,
         document,
+        contextValue: {
+          dataLoaders: dataLoaders,
+        },
         variableValues: req.body.variables,
       });
 

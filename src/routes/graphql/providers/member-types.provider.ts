@@ -1,23 +1,25 @@
 import { AbstractProvider } from './provider.abstract.js';
-import { httpErrors } from '@fastify/sensible';
-import { UUID } from 'node:crypto';
+import { MemberTypeId } from '../../member-types/schemas.js';
+import { MemberType } from '@prisma/client';
 
 export class MemberTypesProvider extends AbstractProvider {
-  public async getMemberType(id: UUID) {
-    const memberType = await this.prisma.memberType.findUnique({
+  public async getMemberType(id: MemberTypeId): Promise<MemberType | null> {
+    return this.prisma.memberType.findUnique({
       where: {
         id: id,
       },
     });
-
-    if (memberType === null) {
-      throw httpErrors.notFound();
-    }
-
-    return memberType;
   }
 
-  public async getMemberTypes() {
+  public async getMemberTypes(): Promise<MemberType[]> {
     return this.prisma.memberType.findMany();
+  }
+
+  public async getMemberTypesByIds(memberTypeIds: MemberTypeId[]): Promise<MemberType[]> {
+    return this.prisma.memberType.findMany({
+      where: {
+        id: { in: memberTypeIds },
+      },
+    });
   }
 }
