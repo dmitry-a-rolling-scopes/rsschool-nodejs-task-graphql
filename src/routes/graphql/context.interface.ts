@@ -9,6 +9,7 @@ export interface Context {
     profiles: DataLoader<UUID, Profile[]>;
     posts: DataLoader<UUID, Post[]>;
     subscribedToUser: DataLoader<UUID, User[]>;
+    user: DataLoader<UUID, User>;
     userSubscribedTo: DataLoader<UUID, User[]>;
   };
 }

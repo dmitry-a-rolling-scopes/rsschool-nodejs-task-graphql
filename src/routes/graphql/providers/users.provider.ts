@@ -11,8 +11,16 @@ export class UsersProvider extends AbstractProvider {
     });
   }
 
-  public async getUsers(): Promise<User[]> {
-    return this.prisma.user.findMany();
+  public async getUsers(
+    includeSubscribedToUser: boolean = true,
+    includeUserSubscribedTo = true,
+  ): Promise<User[]> {
+    return this.prisma.user.findMany({
+      include: {
+        subscribedToUser: includeSubscribedToUser,
+        userSubscribedTo: includeUserSubscribedTo,
+      },
+    });
   }
 
   public async getSubscribedToUsersByAuthorIds(authorIds: UUID[]): Promise<User[]> {
